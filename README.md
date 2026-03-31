@@ -6,15 +6,6 @@
 
 &nbsp;&nbsp;&nbsp;
 
-## 🎬 Demo / המחשה
-
-<p align="center">
-  <img src="https://via.placeholder.com/400x200?text=Network+Traffic+Monitoring+View" alt="Monitoring View">
-</p>
-<p align="center">
-  <em>ממשק הניטור והתראות האבטחה בזמן אמת</em>
-</p>
-
 ## 🔎 Overview
 
 **NetGuard** נועד לספק הצצה עמוקה למה שקורה בתוך כרטיס הרשת שלך. 
