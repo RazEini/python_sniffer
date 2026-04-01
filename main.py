@@ -1,62 +1,116 @@
-from scapy.all import sniff, IP, TCP, UDP, Raw
-from datetime import datetime
+import threading
+import logging
+from queue import Queue, Empty
+from datetime import datetime, timedelta
+from collections import defaultdict
+from scapy.all import sniff, IP, TCP, UDP, Raw, DNSQR
 
-# הגדרת צבעים
-RED = "\033[91m"
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-CYAN = "\033[96m"
-RESET = "\033[0m"
+class Colors:
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    CYAN = "\033[96m"
+    MAGENTA = "\033[95m"
+    RESET = "\033[0m"
 
-def log_alert(message):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("security_log.txt", "a") as f:
-        f.write(f"[{timestamp}] {message}\n")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.FileHandler("network_security.log"), logging.StreamHandler()]
+)
 
-def packet_callback(packet):
-    if packet.haslayer(IP):
-        ip_layer = packet.getlayer(IP)
-        src_ip = ip_layer.src
-        dst_ip = ip_layer.dst
+class NetworkGuardian:
+    def __init__(self):
+        self.packet_queue = Queue()
+        self.running = True
+        self.DOS_THRESHOLD = 50        
+        self.SCAN_THRESHOLD = 15       
+        self.whitelist = set() 
+        self.blacklist = {}            
+        self.syn_counts = defaultdict(int)
+        self.port_history = defaultdict(set)
+        self.last_cleanup = datetime.now()
 
-        if packet.haslayer(TCP):
-            tcp_layer = packet.getlayer(TCP)
+    def _log_alert(self, level, msg, color=Colors.RESET):
+        logging.info(f"{color}[{level}] {msg}{Colors.RESET}")
+
+    def is_isolated(self, ip):
+        if ip in self.blacklist:
+            if datetime.now() < self.blacklist[ip]:
+                return True
+            else:
+                del self.blacklist[ip]
+        return False
+
+    def analyze_packet(self, pkt):
+        if not pkt.haslayer(IP):
+            return
+
+        src_ip = pkt[IP].src
+        if src_ip in self.whitelist or self.is_isolated(src_ip):
+            return
+
+        # 1. זיהוי שאילתות DNS (שמות אתרים) - זה יוסיף הרבה "חיים" למסך
+        if pkt.haslayer(DNSQR):
+            query = pkt[DNSQR].qname.decode(errors='ignore')
+            # נתעלם משאילתות פנימיות משעממות של ווינדוס
+            if not query.endswith(".local."):
+                self._log_alert("DNS", f"Device {src_ip} is looking for: {query}", Colors.CYAN)
+
+        # 2. זיהוי DoS (SYN Flood)
+        if pkt.haslayer(TCP) and pkt[TCP].flags == "S":
+            self.syn_counts[src_ip] += 1
+            if self.syn_counts[src_ip] > self.DOS_THRESHOLD:
+                self.blacklist[src_ip] = datetime.now() + timedelta(minutes=5)
+                self._log_alert("CRITICAL", f"!!! DoS DETECTED: Isolating {src_ip} !!!", Colors.RED)
+
+        # 3. זיהוי סריקת פורטים
+        dst_port = pkt[TCP].dport if pkt.haslayer(TCP) else (pkt[UDP].dport if pkt.haslayer(UDP) else None)
+        if dst_port:
+            self.port_history[src_ip].add(dst_port)
+            if len(self.port_history[src_ip]) > self.SCAN_THRESHOLD:
+                self._log_alert("WARNING", f"Port Scan detected from {src_ip}", Colors.YELLOW)
+                self.port_history[src_ip].clear()
+
+        # 4. Deep Packet Inspection (DPI)
+        if pkt.haslayer(Raw):
+            try:
+                payload = pkt[Raw].load.decode('utf-8', errors='ignore').lower()
+                suspicious = ["admin", "password", "etc/passwd", "select * from"]
+                for word in suspicious:
+                    if word in payload:
+                        self._log_alert("SECURITY", f"Suspicious keyword '{word}' detected from {src_ip}", Colors.MAGENTA)
+            except:
+                pass
+
+    def packet_worker(self):
+        while self.running:
+            try:
+                packet = self.packet_queue.get(timeout=1)
+                self.analyze_packet(packet)
+                self.packet_queue.task_done()
+            except Empty:
+                continue
             
-            # בדיקת פורט 80 (HTTP לא מאובטח)
-            if tcp_layer.dport == 80:
-                alert_msg = f"ALERT: Unsecured HTTP from {src_ip} to {dst_ip}"
-                print(f"{RED}[!] {alert_msg}{RESET}")
-                
-                # חשיפת תוכן החבילה (Deep Packet Inspection)
-                if packet.haslayer(Raw):
-                    payload = packet.getlayer(Raw).load
-                    try:
-                        # מנסים להפוך את המידע לטקסט קריא
-                        decoded_data = payload.decode('utf-8', errors='ignore')
-                        print(f"    {CYAN}Data Snippet:{RESET} {decoded_data[:100].strip()}...")
-                    except:
-                        print(f"    {CYAN}Data Snippet:{RESET} [Binary/Encrypted Data]")
-                
-                log_alert(alert_msg)
-            
-            elif tcp_layer.dport == 443:
-                # מדפיס HTTPS רק כדי שתראה שהתנועה המאובטחת עדיין עוברת
-                print(f"{GREEN}[TCP/HTTPS] {src_ip} --> {dst_ip}{RESET}")
+            if datetime.now() - self.last_cleanup > timedelta(minutes=1):
+                self.syn_counts.clear()
+                self.port_history.clear()
+                self.last_cleanup = datetime.now()
 
-        elif packet.haslayer(UDP):
-            udp_layer = packet.getlayer(UDP)
-            if udp_layer.dport == 53:
-                print(f"{YELLOW}[DNS Query] {src_ip} searching for a domain...{RESET}")
+    def start(self):
+        print(f"{Colors.CYAN}NetworkGuardian Engine Starting...{Colors.RESET}")
+        worker = threading.Thread(target=self.packet_worker, daemon=True)
+        worker.start()
 
-def main():
-    print(f"{YELLOW}--- Deep Packet Inspector Started ---{RESET}")
-    print("Monitoring all IP traffic. Alerts saved to 'security_log.txt'")
-    print("Press Ctrl+C to stop.\n")
-    
-    try:
-        sniff(filter="ip", prn=packet_callback, store=0)
-    except KeyboardInterrupt:
-        print(f"\n{YELLOW}--- Monitoring Stopped ---{RESET}")
+        print(f"{Colors.GREEN}[*] Worker Thread active. Sniffing all traffic...{Colors.RESET}")
+        try:
+            # הורדנו את הפילטר "ip" כדי לתפוס גם DNS (שמשתמש ב-UDP) וגם IPv6
+            sniff(prn=lambda x: self.packet_queue.put(x), store=0)
+        except Exception as e:
+            print(f"{Colors.RED}[!] Error: {e}{Colors.RESET}")
+        except KeyboardInterrupt:
+            self.running = False
 
 if __name__ == "__main__":
-    main()
+    guardian = NetworkGuardian()
+    guardian.start()
