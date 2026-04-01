@@ -88,7 +88,7 @@
   <hr>
 
   <div dir="rtl">
-  <h2>🛠️ טכנולוגיות וארכיטקטורה</h2>
+  <h2 align="center">🛠️ טכנולוגיות וארכיטקטורה</h2>
   <ul>
     <li><strong>Concurrency:</strong> שימוש ב-<code>threading</code> וב-<code>queue.Queue</code> להפרדה בין שלב הלכידה (Sniffing) לשלב הניתוח (Processing).</li>
     <li><strong>DPI Engine:</strong> ניתוח שכבת ה-Raw Packet לחילוץ מחרוזות טקסטואליות וזיהוי דפוסי תקיפה.</li>
@@ -102,18 +102,18 @@
   <h2>⚙️ התקנה והרצה (Quick Start)</h2>
   <div dir="ltr" align="left">
     <pre>
-# Clone the repository
+## Clone the repository
 git clone https://github.com/Raz-Eini/python_sniffer.git
 cd python_sniffer
 
-# Setup Virtual Environment
+## Setup Virtual Environment
 python -m venv .venv
 .\.venv\Scripts\activate  # On Windows
 
-# Install Dependencies
+## Install Dependencies
 pip install scapy
 
-# Run as Administrator (Required for Raw Sockets)
+## Run as Administrator (Required for Raw Sockets)
 python main.py
     </pre>
   </div>
